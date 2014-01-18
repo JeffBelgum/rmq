@@ -3,15 +3,19 @@
 
 require "bunny"
 
+topic = 'armrest'
+route = 'tasks.import'
+
+
 conn = Bunny.new
 conn.start
 
-ch       = conn.create_channel
-x        = ch.topic("topic_logs")
-severity = ARGV.shift || "anonymous.info"
-msg      = ARGV.empty? ? "Hello World!" : ARGV.join(" ")
+channel = conn.create_channel
+exchange = channel.topic topic, durable: true
 
-x.publish(msg, :routing_key => severity)
-puts " [x] Sent #{severity}:#{msg}"
+msg = ARGV.empty? ? "here's ya task!" : ARGV.join(" ")
+
+exchange.publish(msg, routing_key: route, persistent: true)
+puts " [x] Sent #{topic} :: #{route} :: #{msg}"
 
 conn.close
