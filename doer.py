@@ -1,32 +1,66 @@
 #!/usr/bin/env python
 import pika
-import sys
 
-topic = 'armrest'
-route = 'tasks.import'
-queue_name = 'importer' # FIXME: the SENDER should create the queue also, otherwise until the queue is created, messages are lost
-
-connection = pika.BlockingConnection(pika.ConnectionParameters(host='localhost'))
-channel = connection.channel()
-
-channel.exchange_declare(exchange=topic, type='topic', durable=True)
-
-# can't use anon queue, because then we lose messages after reboot
-
-result = channel.queue_declare(queue=queue_name, durable=True)
-
-channel.queue_bind(exchange=topic, queue=queue_name, routing_key=route)
-
-print ' [*] Waiting for logs. To exit press CTRL+C'
-
-def callback(ch, method, properties, body):
-    print " [x] %r:%r" % (method.routing_key, body,)
-    ch.basic_ack(delivery_tag=method.delivery_tag)
-
-
-channel.basic_consume(callback, queue=queue_name)
-
-channel.start_consuming()
+# FIXME: error handling on all pika calls
 # FIXME: exception when we reboot the server/lose conn
-
 # TODO: daemonize, generalize
+# FIXME: verify persistence
+
+class Caerbannog(object):
+    def __init__(self, topic, queue_name, host='localhost'):
+        self.topic, self.queue_name, self.host = topic, queue_name, host
+
+        self.routes = {}
+
+        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=self.host))
+        self.channel = self.connection.channel()
+
+        self.channel.exchange_declare(exchange=self.topic, type='topic', durable=True)
+        self.channel.queue_declare(queue=self.queue_name, durable=True)
+
+        super(Caerbannog, self).__init__()
+
+    def consume(self):
+        print " [i] consuming routes: (%r)" % (self.routes,)
+
+        self.channel.basic_consume(self._callback, queue=self.queue_name)
+        self.channel.start_consuming()
+
+    def route(self, route, method):
+        self.routes[route] = method
+        self.channel.queue_bind(exchange=self.topic, queue=self.queue_name, routing_key=route)
+
+    def _callback(self, ch, method, properties, body):
+        print " [r] %r:%r" % (method.routing_key, body,)
+
+        # FIXME: will this work for # and * routes?
+        #
+        callback_method = self.routes[method.routing_key]
+
+        if callback_method:
+            callback_method(body)
+        else:
+            print " [!] consuming unroutable msg: %r" % (callback_method.routing_key,)
+
+        print "%r" % ch
+        print "%r" % method
+        ch.basic_ack(delivery_tag=method.delivery_tag)        
+
+class ArmrestImporter(Caerbannog):
+    def __init__(self, host='localhost'):
+        super(ArmrestImporter, self).__init__('armrest', 'importer', host)
+
+        self.route('tasks.import', self.task_import)
+        self.route('armrest.c2', self.c2)
+
+    def task_import(self, msg):
+        print " [m] task_import: [%r]" % (msg,)
+
+    def c2(self, msg):
+        print " [m] c2: [%r]" % (msg,)
+
+ai = ArmrestImporter()
+ai.consume()
+
+
+

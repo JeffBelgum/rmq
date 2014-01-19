@@ -5,7 +5,7 @@ require "bunny"
 
 topic = 'armrest'
 route = 'tasks.import'
-
+# route = 'armrest.c2'
 
 conn = Bunny.new
 conn.start
