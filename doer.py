@@ -4,7 +4,8 @@ import pika
 # FIXME: error handling on all pika calls
 # FIXME: exception when we reboot the server/lose conn
 # TODO: daemonize, generalize
-# FIXME: verify persistence
+# FIXME: verify message persistence handling
+# FIXME: replace print with logger
 
 class Caerbannog(object):
     def __init__(self, topic, queue_name, host='localhost'):
@@ -26,25 +27,25 @@ class Caerbannog(object):
         self.channel.basic_consume(self._callback, queue=self.queue_name)
         self.channel.start_consuming()
 
-    def route(self, route, method):
-        self.routes[route] = method
+    def route(self, route, callback):
+        self.routes[route] = callback
         self.channel.queue_bind(exchange=self.topic, queue=self.queue_name, routing_key=route)
 
-    def _callback(self, ch, method, properties, body):
+    def _callback(self, channel, method, properties, body):
         print " [r] %r:%r" % (method.routing_key, body,)
 
         # FIXME: will this work for # and * routes?
         #
-        callback_method = self.routes[method.routing_key]
+        callback = self.routes[method.routing_key]
 
-        if callback_method:
-            callback_method(body)
+        if callback:
+            callback(body)
         else:
-            print " [!] consuming unroutable msg: %r" % (callback_method.routing_key,)
+            print " [!] consuming unroutable msg: %r" % (method.routing_key,)
 
         print "%r" % ch
         print "%r" % method
-        ch.basic_ack(delivery_tag=method.delivery_tag)        
+        channel.basic_ack(delivery_tag=method.delivery_tag)        
 
 class ArmrestImporter(Caerbannog):
     def __init__(self, host='localhost'):
