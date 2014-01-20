@@ -1,18 +1,25 @@
 #!/usr/bin/env python
 import pika
+import logging
 
 # FIXME: error handling on all pika calls
 # FIXME: exception when we reboot the server/lose conn
+#            logger.error('Failed to open file', exc_info=True)
+
 # TODO: daemonize, generalize
 # FIXME: verify message persistence handling
-# FIXME: replace print with logger
+# FIXME: use logging config file, learn to show our messages but hide pika's
+# FIXME: use requirements.txt
 
 class Caerbannog(object):
-    def __init__(self, topic, queue_name, host='localhost'):
+    def __init__(self, topic, queue_name, host='localhost', logger=None):
         self.topic, self.queue_name, self.host = topic, queue_name, host
+        
+        self.logger = logger or logging.getLogger(__name__)
 
         self.routes = {}
 
+        self.logger.info("connecting to rabbitmq: [%s]" % (self.host))
         self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=self.host))
         self.channel = self.connection.channel()
 
@@ -22,17 +29,17 @@ class Caerbannog(object):
         super(Caerbannog, self).__init__()
 
     def consume(self):
-        print " [i] consuming routes: (%r)" % (self.routes,)
-
         self.channel.basic_consume(self._callback, queue=self.queue_name)
+        self.logger.info("consuming")
         self.channel.start_consuming()
 
     def route(self, route, callback):
+        self.logger.debug("adding route: %s => %r" % (route, callback))
         self.routes[route] = callback
         self.channel.queue_bind(exchange=self.topic, queue=self.queue_name, routing_key=route)
 
     def _callback(self, channel, method, properties, body):
-        print " [r] %r:%r" % (method.routing_key, body,)
+        self.logger.debug("%r:%r" % (method.routing_key, body))
 
         # FIXME: will this work for # and * routes?
         #
@@ -41,15 +48,13 @@ class Caerbannog(object):
         if callback:
             callback(body)
         else:
-            print " [!] consuming unroutable msg: %r" % (method.routing_key,)
+            self.logger.warning("consuming unroutable message: [%s]:[%s]" % (method.routing_key, body))
 
-        print "%r" % ch
-        print "%r" % method
         channel.basic_ack(delivery_tag=method.delivery_tag)        
 
 class ArmrestImporter(Caerbannog):
-    def __init__(self, host='localhost'):
-        super(ArmrestImporter, self).__init__('armrest', 'importer', host)
+    def __init__(self, host='localhost', logger=None):
+        super(ArmrestImporter, self).__init__('armrest', 'importer', host=host, logger=logger)
 
         self.route('tasks.import', self.task_import)
         self.route('armrest.c2', self.c2)
@@ -60,8 +65,13 @@ class ArmrestImporter(Caerbannog):
     def c2(self, msg):
         print " [m] c2: [%r]" % (msg,)
 
-ai = ArmrestImporter()
+
+logger = logging.getLogger('doer')
+handler = logging.StreamHandler()
+formatter = logging.Formatter('[%(asctime)s]:[%(name)s]:[%(pathname)s:%(lineno)s]:[%(levelname)s]:[%(message)s]', datefmt="%Y/%m/%d %H:%M:%S")
+handler.setFormatter(formatter)
+logger.addHandler(handler)
+logger.setLevel(logging.DEBUG)
+
+ai = ArmrestImporter(logger=logger)
 ai.consume()
-
-
-
