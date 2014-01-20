@@ -1,21 +1,25 @@
 #!/usr/bin/env python
 import pika
+import daemon
+import daemon.runner
+import lockfile
+import os
 import logging
+import logging.config
 
 # FIXME: error handling on all pika calls
 # FIXME: exception when we reboot the server/lose conn
 #            logger.error('Failed to open file', exc_info=True)
 
-# TODO: daemonize, generalize
+# FIXME: graceful exit
 # FIXME: verify message persistence handling
-# FIXME: use logging config file, learn to show our messages but hide pika's
-# FIXME: use requirements.txt
+# FIXME: merge daemon boilerplate into Caerbannog
 
 class Caerbannog(object):
-    def __init__(self, topic, queue_name, host='localhost', logger=None):
+    def __init__(self, topic, queue_name, host='localhost'):
         self.topic, self.queue_name, self.host = topic, queue_name, host
         
-        self.logger = logger or logging.getLogger(__name__)
+        self.logger = logging.getLogger('caerbannog')
 
         self.routes = {}
 
@@ -53,8 +57,8 @@ class Caerbannog(object):
         channel.basic_ack(delivery_tag=method.delivery_tag)        
 
 class ArmrestImporter(Caerbannog):
-    def __init__(self, host='localhost', logger=None):
-        super(ArmrestImporter, self).__init__('armrest', 'importer', host=host, logger=logger)
+    def __init__(self, host='localhost'):
+        super(ArmrestImporter, self).__init__('armrest', 'importer', host=host)
 
         self.route('tasks.import', self.task_import)
         self.route('armrest.c2', self.c2)
@@ -66,12 +70,22 @@ class ArmrestImporter(Caerbannog):
         print " [m] c2: [%r]" % (msg,)
 
 
-logger = logging.getLogger('doer')
-handler = logging.StreamHandler()
-formatter = logging.Formatter('[%(asctime)s]:[%(name)s]:[%(pathname)s:%(lineno)s]:[%(levelname)s]:[%(message)s]', datefmt="%Y/%m/%d %H:%M:%S")
-handler.setFormatter(formatter)
-logger.addHandler(handler)
-logger.setLevel(logging.DEBUG)
+class App(object):
+    def __init__(self, chdir_path):
+        self.stdin_path = '/dev/null'
+        self.stdout_path = '/dev/null'
+        self.stderr_path = '/dev/null'
+        self.pidfile_path = '/tmp/doer.pid'
+        self.pidfile_timeout = 1
+        self.chdir_path = chdir_path
 
-ai = ArmrestImporter(logger=logger)
-ai.consume()
+    def run(self):
+        os.chdir(self.chdir_path)
+        logging.config.fileConfig('logging.conf', disable_existing_loggers=False)
+
+        ai = ArmrestImporter()
+        ai.consume()
+
+app = App(os.getcwd())
+runner = daemon.runner.DaemonRunner(app)
+runner.do_action()
